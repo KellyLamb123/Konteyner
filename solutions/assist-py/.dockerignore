@@ -9,3 +9,4 @@ venv/
 *.log
 Dockerfile*
 README.md
+screenshots/
