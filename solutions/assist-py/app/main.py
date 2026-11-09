@@ -1,4 +1,7 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Response
+from sqlalchemy import text
+from datetime import datetime, timezone
+import socket
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import os
@@ -32,13 +35,43 @@ async def root():
         "message": f"👋 Привет, {OWNER}!",
         "service": "personal-assistant",
         "version": "2.0",
-        "endpoints": ["/me", "/notes", "/weather/{city}", "/secret/{key}"],
+        "hostname": socket.gethostname(),
+        "server_time": datetime.now(timezone.utc).isoformat(),
+        "endpoints": [
+            "/me",
+            "/notes",
+            "/weather/{city}",
+            "/secret/{key}"
+        ],
     }
 
 
 @app.get("/health")
-async def health():
-    return {"status": "healthy", "owner": OWNER}
+async def health(response: Response):
+    db_ok = False
+    redis_ok = False
+
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception:
+        pass
+
+    try:
+        redis_ok = bool(redis_client.ping())
+    except Exception:
+        pass
+
+    if not (db_ok and redis_ok):
+        response.status_code = 503
+
+    return {
+        "status": "healthy" if db_ok and redis_ok else "unhealthy",
+        "owner": OWNER,
+        "database": db_ok,
+        "redis": redis_ok
+    }
 
 
 @app.get("/me")
