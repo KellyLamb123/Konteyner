@@ -5,7 +5,7 @@ metadata:
   name: meshcheriakov-app
 
 spec:
-  replicas: 1
+  replicas: 4
 
   selector:
     matchLabels:
@@ -17,10 +17,18 @@ spec:
         app: meshcheriakov-app
 
     spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: meshcheriakov-app
+
       containers:
         - name: fastapi
-          image: meshcheriakov-assistant:lab5
-          imagePullPolicy: Never
+          image: ghcr.io/kellylamb123/konteyner:sha-3847369
+          imagePullPolicy: IfNotPresent
 
           ports:
             - containerPort: 8000
@@ -28,7 +36,6 @@ spec:
           envFrom:
             - configMapRef:
                 name: meshcheriakov-app-config
-
             - secretRef:
                 name: meshcheriakov-app-secret
 
