@@ -32,7 +32,7 @@ class NoteCreate(BaseModel):
 @app.get("/")
 async def root():
     return {
-        "message": f"👋 Привет, {OWNER}!",
+        "message": f"Привет из обновлённого Kubernetes-кластера, {OWNER}!", 
         "service": "personal-assistant",
         "version": "2.0",
         "hostname": socket.gethostname(),
