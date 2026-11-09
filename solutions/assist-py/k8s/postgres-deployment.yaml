@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: meshcheriakov-postgres
+
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+
+  selector:
+    matchLabels:
+      app: meshcheriakov-postgres
+
+  template:
+    metadata:
+      labels:
+        app: meshcheriakov-postgres
+
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15
+          ports:
+            - containerPort: 5432
+
+          env:
+            - name: POSTGRES_USER
+              value: "user_00"
+
+            - name: POSTGRES_DB
+              value: "meshcheriakov00"
+
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: meshcheriakov-app-secret
+                  key: POSTGRES_PASSWORD
+
+            - name: PGDATA
+              value: "/var/lib/postgresql/data/pgdata"
+
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+      volumes:
+        - name: postgres-storage
+          persistentVolumeClaim:
+            claimName: meshcheriakov-postgres-pvc

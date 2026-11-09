@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: meshcheriakov-postgres
+
+spec:
+  type: ClusterIP
+
+  selector:
+    app: meshcheriakov-postgres
+
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
