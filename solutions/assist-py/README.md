@@ -167,3 +167,13 @@ kubectl describe pod -l app=meshcheriakov-app
 Файл `k8s/app-secret.yaml` содержит реальные значения и исключён из Git с помощью `.gitignore`.
 
 В репозитории публикуется только `k8s/app-secret.example.yaml` с учебными значениями.
+
+### 10. Бонусное задание — Ingress
+
+Для маршрутизации HTTP-запросов к приложению
+используется NGINX Ingress Controller.
+
+Включение Ingress-аддона:
+
+```bash
+minikube addons enable ingress
