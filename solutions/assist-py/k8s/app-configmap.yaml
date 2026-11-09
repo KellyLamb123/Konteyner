@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: meshcheriakov-app-config
+
+data:
+  APP_OWNER: "meshcheriakov"
+  CACHE_TTL: "120"
+
+  REDIS_URL: "redis://meshcheriakov-redis:6379/0"
+
+  POSTGRES_HOST: "meshcheriakov-postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: "user_00"
+  POSTGRES_DB: "meshcheriakov00"

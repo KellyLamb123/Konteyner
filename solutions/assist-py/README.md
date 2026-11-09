@@ -1,165 +1,169 @@
-# 🎓 Personal Assistant — учебный проект для практики Docker
 
-Простое FastAPI-приложение, которое используется как основа для лабораторной работы по Docker.
+## Kubernetes (Лабораторная работа №5)
 
-## 📁 Структура проекта
+### Описание
 
-```
-simple_example/
-├── app/
-│   ├── __init__.py
-│   ├── main.py          # FastAPI + маршруты
-│   ├── database.py      # Подключение к PostgreSQL
-│   ├── models.py        # Модель Note (SQLAlchemy)
-│   └── crud.py          # CRUD операции
-├── config/
-│   └── app.conf         # Конфиг для bind mount (челлендж)
-├── requirements.txt     # Python-зависимости
-└── README.md
-```
+В лабораторной работе №5 приложение Personal Assistant развёртывается в локальном кластере Kubernetes с использованием Minikube.
 
-## 💻 Локальный запуск (без Docker)
+Приложение состоит из трёх компонентов:
+- FastAPI — основное веб-приложение;
+- PostgreSQL — база данных для хранения заметок;
+- Redis — система кэширования запросов погоды.
 
-### 1. Установить зависимости
+В отличие от предыдущей лабораторной работы, вместо Docker Compose используются ресурсы Kubernetes: Deployment, Service, ConfigMap, Secret и PersistentVolumeClaim.
+
+### 1. Подготовка окружения
+
+Для работы необходимы Docker Desktop, Minikube и kubectl.
+
+Все команды выполняются из каталога `solutions/assist-py/`.
+
+Запуск локального кластера Kubernetes:
 
 ```bash
-cd simple_example
-pip install -r requirements.txt
+minikube start --driver=docker --cpus=2 --memory=4096
 ```
 
-### 2. Задать переменные окружения
-
-**macOS / Linux:**
+Проверка состояния кластера:
 
 ```bash
-export APP_OWNER=ВашеИмя
-export APP_SECRET=ваш_секретный_ключ
-export DATABASE_URL=ваш урл
+minikube status
+kubectl get nodes
 ```
 
-**Windows (PowerShell):**
+Узел Kubernetes должен находиться в состоянии `Ready`.
 
-```powershell
-$env:APP_OWNER="ВашеИмя"
-$env:APP_SECRET="ваш_секретный_ключ"
-$env:DATABASE_URL="postgresql://postgres"
-```
+### 2. Подготовка Docker-образа
 
-**Windows (CMD):**
-
-```cmd
-set APP_OWNER=ВашеИмя
-set APP_SECRET=ваш_секретный_ключ
-set DATABASE_URL=postgresql://postgres:postgres@localhost:5432/assistant_db
-```
-
-> Если не задать переменные, приложение запустится со значениями по умолчанию.
-> Для работы заметок необходима запущенная PostgreSQL (см. ниже).
-
-### 3. Запустить сервер
+Сборка образа приложения:
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+docker build -t meshcheriakov-assistant:lab5 .
 ```
 
-Флаг `--reload` автоматически перезапускает сервер при изменении кода.
-
-### 4. Открыть в браузере
-
-- Приложение: **http://localhost:8000**
-- Swagger UI: **http://localhost:8000/docs**
-
-## 📡 Эндпоинты
-
-| Метод | URL | Описание |
-|-------|-----|----------|
-| GET | `/` | Главная страница — приветствие и список эндпоинтов |
-| GET | `/health` | Healthcheck — статус приложения |
-| GET | `/docs` | Swagger UI — интерактивная документация (встроена в FastAPI) |
-| GET | `/me` | Информация о владельце (из переменных окружения) |
-| GET | `/secret/{key}` | Проверка секретного ключа — убедитесь, что `APP_SECRET` пробрасывается |
-| GET | `/weather/{city}` | Текущая погода в городе через Open-Meteo API |
-| POST | `/notes` | Создать заметку в БД (тело: `{"text": "..."}`) |
-| GET | `/notes` | Получить все заметки текущего владельца |
-| GET | `/notes/{id}` | Получить заметку по ID |
-| DELETE | `/notes/{id}` | Удалить заметку по ID |
-
-### Примеры запросов
+Загрузка образа в Minikube:
 
 ```bash
-# Главная
-curl http://localhost:8000/
-
-# Погода в Москве
-curl http://localhost:8000/weather/Moscow
-
-# Проверка секретного ключа
-curl http://localhost:8000/secret/ваш_секретный_ключ
-
-# Создать заметку (сохраняется в PostgreSQL)
-curl -X POST http://localhost:8000/notes \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Моя первая заметка"}'
-
-# Получить заметки текущего владельца
-curl http://localhost:8000/notes
-
-# Получить заметку по ID
-curl http://localhost:8000/notes/1
-
-# Удалить заметку
-curl -X DELETE http://localhost:8000/notes/1
+minikube image load meshcheriakov-assistant:lab5
 ```
 
-## 🔑 Переменные окружения
-
-| Переменная | Описание | Значение по умолчанию |
-|------------|----------|-----------------------|
-| `APP_OWNER` | Имя владельца приложения | `anonymous` |
-| `APP_SECRET` | Секретный ключ для эндпоинта `/secret/{key}` | `default_secret` |
-| `DATABASE_URL` | Строка подключения к PostgreSQL | `postgresql://postgres:postgres@localhost:5432/assistant_db` |
-
-
-## 🗄 PostgreSQL (для эндпоинтов /notes)
-
-Заметки хранятся в PostgreSQL. Для локальной разработки проще всего запустить БД через Docker:
+Проверка наличия образа:
 
 ```bash
-docker run -d \
-  --name assistant-db \
-  -e POSTGRES_USER=postgres \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=assistant_db \
-  -p 5432:5432 \
-  postgres:16-alpine
+minikube image ls | grep meshcheriakov-assistant
 ```
 
-Таблица `notes` создаётся автоматически при старте приложения (`Base.metadata.create_all`).
+### 3. Развёртывание PostgreSQL
 
-### Файл config/app.conf
+Сначала необходимо создать локальный файл `k8s/app-secret.yaml` на основе `k8s/app-secret.example.yaml` и указать в нём реальные значения `POSTGRES_PASSWORD` и `APP_SECRET`.
 
-В папке `config/` лежит файл `app.conf` — пример конфигурации для **bind mount** в лабораторной работе 4. Студент может монтировать этот файл в контейнер и использовать значения из него.
+Применение Secret и манифестов PostgreSQL:
 
-## 🌤 API погоды — важно для пользователей из РФ
+```bash
+kubectl apply -f k8s/app-secret.yaml
+kubectl apply -f k8s/postgres-pvc.yaml
+kubectl apply -f k8s/postgres-deployment.yaml
+kubectl apply -f k8s/postgres-service.yaml
+```
 
-Эндпоинт `/weather/{city}` обращается к открытому API **[Open-Meteo](https://open-meteo.com/)** (бесплатный, без ключа):
+Проверка:
 
-1. **Геокодинг** — `geocoding-api.open-meteo.com` — получает координаты города
-2. **Прогноз** — `api.open-meteo.com` — получает текущую погоду по координатам
+```bash
+kubectl get pods -l app=meshcheriakov-postgres
+kubectl get pvc
+```
 
-### ⚠️ Блокировки РКН
+Pod должен находиться в состоянии `Running`, а PVC — `Bound`.
 
-Домены `open-meteo.com` могут быть недоступны из российских сетей из-за блокировок РКН.
+### 4. Развёртывание Redis
 
-Если эндпоинт `/weather/{city}` возвращает ошибку таймаута — **необходимо использовать средства обхода блокировок:**
+Применение манифестов Redis:
 
-- **VPN** — включите VPN на машине, где запущен Docker
+```bash
+kubectl apply -f k8s/redis-deployment.yaml
+kubectl apply -f k8s/redis-service.yaml
+```
 
-## ✅ Как проверить, что всё работает
+Проверка Redis:
 
-1. `curl http://localhost:8000/` — должен вернуть приветствие с вашим именем
-2. `curl http://localhost:8000/me` — должен показать `secret_prefix` (первые 6 символов вашего ключа)
-3. `curl http://localhost:8000/secret/ваш_ключ` — должен вернуть `LAB2_SUCCESS_ВАШЕИМЯ`
-4. `curl http://localhost:8000/weather/London` — должен вернуть температуру, влажность, ветер
-5. `docker inspect --format='{{.State.Health.Status}}' personal-assistant` — должен вернуть `healthy`
+```bash
+kubectl exec deployment/meshcheriakov-redis -- redis-cli PING
+```
 
+Ожидаемый результат: `PONG`.
+
+### 5. Развёртывание FastAPI
+
+Применение ConfigMap, Deployment и Service приложения:
+
+```bash
+kubectl apply -f k8s/app-configmap.yaml
+kubectl apply -f k8s/app-deployment.yaml
+kubectl apply -f k8s/app-service.yaml
+```
+
+Проверка развёртывания:
+
+```bash
+kubectl get pods
+kubectl get services
+```
+
+Все три Pod должны находиться в состоянии `Running`.
+
+### 6. Доступ к приложению
+
+Для открытия FastAPI на macOS используется команда:
+
+```bash
+minikube service meshcheriakov-app
+```
+
+Minikube предоставляет локальный адрес приложения. Терминал с запущенным сервисным туннелем необходимо оставить открытым.
+
+Для просмотра Swagger UI к адресу приложения нужно добавить `/docs`.
+
+### 7. Проверка работоспособности
+
+Проверка всех основных ресурсов:
+
+```bash
+kubectl get all
+kubectl get pvc
+```
+
+Просмотр логов FastAPI:
+
+```bash
+kubectl logs deployment/meshcheriakov-app
+```
+
+Через Swagger UI необходимо проверить следующие эндпоинты:
+
+- `GET /` — приветствие, hostname и server_time;
+- `GET /health` — состояние PostgreSQL и Redis;
+- `GET /weather/{city}` — первый запрос из API, повторный из Redis;
+- `POST /notes` — создание заметки в PostgreSQL;
+- `GET /notes` — получение сохранённых заметок.
+
+Первый запрос погоды должен возвращать `"source": "api"`, повторный — `"source": "cache"`.
+
+### 8. Проверка readinessProbe и livenessProbe
+
+После настройки проб Kubernetes необходимо выполнить:
+
+```bash
+kubectl describe pod -l app=meshcheriakov-app
+```
+
+В описании Pod должны отображаться настройки readinessProbe и livenessProbe, а состояние готовности должно быть `Ready: True`.
+
+### 9. Хранение конфигурации и секретов
+
+Обычные настройки приложения, включая APP_OWNER, REDIS_URL и CACHE_TTL, хранятся в ConfigMap.
+
+Пароль PostgreSQL и секретный ключ приложения хранятся в Kubernetes Secret.
+
+Файл `k8s/app-secret.yaml` содержит реальные значения и исключён из Git с помощью `.gitignore`.
+
+В репозитории публикуется только `k8s/app-secret.example.yaml` с учебными значениями.
