@@ -1,179 +1,129 @@
 
-## Kubernetes (Лабораторная работа №5)
+# Containerization & Orchestration — Kubernetes и CI/CD
 
-### Описание
+[![CI](https://github.com/KellyLamb123/Konteyner/actions/workflows/ci.yml/badge.svg?branch=lab-6)](https://github.com/KellyLamb123/Konteyner/actions/workflows/ci.yml)
 
-В лабораторной работе №5 приложение Personal Assistant развёртывается в локальном кластере Kubernetes с использованием Minikube.
+## CI/CD и кластер
 
-Приложение состоит из трёх компонентов:
-- FastAPI — основное веб-приложение;
-- PostgreSQL — база данных для хранения заметок;
-- Redis — система кэширования запросов погоды.
+### Описание проекта
 
-В отличие от предыдущей лабораторной работы, вместо Docker Compose используются ресурсы Kubernetes: Deployment, Service, ConfigMap, Secret и PersistentVolumeClaim.
+Лабораторная работа №6 посвящена развёртыванию FastAPI-приложения в двухузловом Kubernetes-кластере k3s, автоматической сборке Docker-образов через GitHub Actions и публикации в GitHub Container Registry (GHCR).
 
-### 1. Подготовка окружения
+Приложение использует PostgreSQL для хранения заметок и Redis для кэширования погоды.
 
-Для работы необходимы Docker Desktop, Minikube и kubectl.
+### Архитектура кластера
 
-Все команды выполняются из каталога `solutions/assist-py/`.
+Кластер развёрнут на двух виртуальных машинах Ubuntu Server 24.04 ARM64 в UTM на macOS. Виртуальные машины объединены локальной сетью в режиме Bridged.
 
-Запуск локального кластера Kubernetes:
+- Master: `meshcheriakov-master`, `192.168.1.88`, роль `control-plane`, метка `role=db`
+- Worker: `meshcheriakov-worker`, `192.168.1.48`, метка `role=app`
+- FastAPI: 4 реплики, размещаемые на обоих узлах
+- PostgreSQL: 1 реплика на Master, PVC с StorageClass `local-path`
+- Redis: 1 реплика, общий кэш приложения
+- NodePort: `30000`
 
-```bash
-minikube start --driver=docker --cpus=2 --memory=4096
+```text
+                  GitHub Actions
+                        |
+                GHCR Docker Image
+                        |
+               Kubernetes (k3s)
+                        |
+          +-------------+-------------+
+          |                           |
+      Master                       Worker
+   192.168.1.88                192.168.1.48
+   control-plane                k3s-agent
+          |                           |
+    FastAPI pods                 FastAPI pods
+    PostgreSQL                   Redis
+    PVC (local-path)
+          |                           |
+          +------- NodePort ----------+
+                       30000
 ```
 
-Проверка состояния кластера:
+### CI — GitHub Actions
+
+Workflow расположен в `.github/workflows/ci.yml`.
+
+При push в ветку `lab-6` выполняются:
+
+1. `test` — установка Python 3.11 и зависимостей, проверка синтаксиса приложения.
+2. `build-and-push` — сборка Docker-образа для `linux/amd64` и `linux/arm64` и публикация в GHCR.
+
+Реестр образов:
+
+`ghcr.io/kellylamb123/konteyner`
+
+### Развёртывание приложения
+
+Из каталога `solutions/assist-py/` на Master:
 
 ```bash
-minikube status
+kubectl apply -f k8s/
+kubectl get pods -o wide
+kubectl get deployments
+```
+
+Настоящий файл `k8s/app-secret.yaml` создаётся локально и не публикуется в GitHub.
+
+### Обновление приложения (Rolling Update)
+
+После изменения кода и успешной сборки в GitHub Actions необходимо использовать SHA-тег нового образа:
+
+```bash
+kubectl set image deployment/meshcheriakov-app \
+  fastapi=ghcr.io/kellylamb123/konteyner:sha-НОВЫЙ_SHA
+
+kubectl rollout status deployment/meshcheriakov-app
+kubectl get pods -o wide
+```
+
+### Откат обновления (Rollback)
+
+```bash
+kubectl rollout history deployment/meshcheriakov-app
+kubectl rollout undo deployment/meshcheriakov-app
+kubectl rollout status deployment/meshcheriakov-app
+```
+
+При необходимости используется `--to-revision=N`, где N — номер нужной ревизии из истории.
+
+### Проверка работы
+
+```bash
+curl http://192.168.1.88:30000/
+curl http://192.168.1.48:30000/health
+kubectl get nodes -o wide
+kubectl get pods -o wide
+```
+
+Redis используется совместно всеми репликами, а заметки сохраняются в общей PostgreSQL.
+
+Для доступа к внешнему Open-Meteo в учебной сети временно использовался HTTPS-прокси на Mac с VPN. Это локальная настройка окружения, не обязательная для запуска Kubernetes.
+
+### Проверка отказоустойчивости
+
+На Worker:
+
+```bash
+sudo systemctl stop k3s-agent
+sudo systemctl start k3s-agent
+```
+
+На Master:
+
+```bash
 kubectl get nodes
+kubectl get pods -o wide
 ```
 
-Узел Kubernetes должен находиться в состоянии `Ready`.
+Эксперимент подтвердил переход Worker в `NotReady` и последующее восстановление `Ready`.
 
-### 2. Подготовка Docker-образа
+### Файлы проекта
 
-Сборка образа приложения:
-
-```bash
-docker build -t meshcheriakov-assistant:lab5 .
+- `solutions/assist-py/` — исходный код приложения и Kubernetes-манифесты.
+- `.github/workflows/ci.yml` — CI workflow.
+- `solutions/reports/lab-6/` — отчёт лабораторной работы.
 ```
-
-Загрузка образа в Minikube:
-
-```bash
-minikube image load meshcheriakov-assistant:lab5
-```
-
-Проверка наличия образа:
-
-```bash
-minikube image ls | grep meshcheriakov-assistant
-```
-
-### 3. Развёртывание PostgreSQL
-
-Сначала необходимо создать локальный файл `k8s/app-secret.yaml` на основе `k8s/app-secret.example.yaml` и указать в нём реальные значения `POSTGRES_PASSWORD` и `APP_SECRET`.
-
-Применение Secret и манифестов PostgreSQL:
-
-```bash
-kubectl apply -f k8s/app-secret.yaml
-kubectl apply -f k8s/postgres-pvc.yaml
-kubectl apply -f k8s/postgres-deployment.yaml
-kubectl apply -f k8s/postgres-service.yaml
-```
-
-Проверка:
-
-```bash
-kubectl get pods -l app=meshcheriakov-postgres
-kubectl get pvc
-```
-
-Pod должен находиться в состоянии `Running`, а PVC — `Bound`.
-
-### 4. Развёртывание Redis
-
-Применение манифестов Redis:
-
-```bash
-kubectl apply -f k8s/redis-deployment.yaml
-kubectl apply -f k8s/redis-service.yaml
-```
-
-Проверка Redis:
-
-```bash
-kubectl exec deployment/meshcheriakov-redis -- redis-cli PING
-```
-
-Ожидаемый результат: `PONG`.
-
-### 5. Развёртывание FastAPI
-
-Применение ConfigMap, Deployment и Service приложения:
-
-```bash
-kubectl apply -f k8s/app-configmap.yaml
-kubectl apply -f k8s/app-deployment.yaml
-kubectl apply -f k8s/app-service.yaml
-```
-
-Проверка развёртывания:
-
-```bash
-kubectl get pods
-kubectl get services
-```
-
-Все три Pod должны находиться в состоянии `Running`.
-
-### 6. Доступ к приложению
-
-Для открытия FastAPI на macOS используется команда:
-
-```bash
-minikube service meshcheriakov-app
-```
-
-Minikube предоставляет локальный адрес приложения. Терминал с запущенным сервисным туннелем необходимо оставить открытым.
-
-Для просмотра Swagger UI к адресу приложения нужно добавить `/docs`.
-
-### 7. Проверка работоспособности
-
-Проверка всех основных ресурсов:
-
-```bash
-kubectl get all
-kubectl get pvc
-```
-
-Просмотр логов FastAPI:
-
-```bash
-kubectl logs deployment/meshcheriakov-app
-```
-
-Через Swagger UI необходимо проверить следующие эндпоинты:
-
-- `GET /` — приветствие, hostname и server_time;
-- `GET /health` — состояние PostgreSQL и Redis;
-- `GET /weather/{city}` — первый запрос из API, повторный из Redis;
-- `POST /notes` — создание заметки в PostgreSQL;
-- `GET /notes` — получение сохранённых заметок.
-
-Первый запрос погоды должен возвращать `"source": "api"`, повторный — `"source": "cache"`.
-
-### 8. Проверка readinessProbe и livenessProbe
-
-После настройки проб Kubernetes необходимо выполнить:
-
-```bash
-kubectl describe pod -l app=meshcheriakov-app
-```
-
-В описании Pod должны отображаться настройки readinessProbe и livenessProbe, а состояние готовности должно быть `Ready: True`.
-
-### 9. Хранение конфигурации и секретов
-
-Обычные настройки приложения, включая APP_OWNER, REDIS_URL и CACHE_TTL, хранятся в ConfigMap.
-
-Пароль PostgreSQL и секретный ключ приложения хранятся в Kubernetes Secret.
-
-Файл `k8s/app-secret.yaml` содержит реальные значения и исключён из Git с помощью `.gitignore`.
-
-В репозитории публикуется только `k8s/app-secret.example.yaml` с учебными значениями.
-
-### 10. Бонусное задание — Ingress
-
-Для маршрутизации HTTP-запросов к приложению
-используется NGINX Ingress Controller.
-
-Включение Ingress-аддона:
-
-```bash
-minikube addons enable ingress
